@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#150827"><title>怪兽吃我的公寓 · 核心玩法 Demo</title><link rel="stylesheet" href="/src/style.css"></head>
+<body>
+<main class="layout">
+<aside class="side intro"><p class="eyebrow">PIKPOK · CORE GAMEPLAY STUDY</p><h1><small>SUPER</small>MONSTERS<span>ATE MY CONDO!</span></h1><p class="chinese-title">怪兽吃我的公寓</p><div class="rule-line"></div><h2>抽走一层，<br>引爆整座公寓。</h2><p class="aside-copy">左右划出楼层，喂饱巨型怪兽。<br>让同色公寓相遇，接住下一次连锁。</p><div class="keys"><kbd>←</kbd><kbd>→</kbd><span>选中楼层后，方向键也能操作</span></div><p class="version">H5 DEMO / 01</p></aside>
+<section id="game" aria-label="怪兽吃我的公寓游戏" tabindex="0">
+<div class="backdrop"><div class="spotlight s1"></div><div class="spotlight s2"></div><div class="spotlight s3"></div><div class="stars">✦<span>✧</span>✦</div><div class="city"></div><div class="billboard"><span>MONSTER</span><b>SHOWTIME!</b></div><div class="road"></div></div>
+<div class="monster left" id="monster0"></div><div class="monster right" id="monster1"></div>
+<div id="webgl" aria-hidden="true"></div><div id="hitboard" aria-label="可左右拖动的公寓楼层"></div><div id="fx" aria-hidden="true"></div><div id="flash"></div>
+<header class="hud"><div class="score"><span>SCORE / 得分</span><strong id="score">0</strong><div class="multipliers"><b id="multiplier">×1</b><span id="chain">CHAIN ×0</span><span id="coins">金币 0</span></div></div><div class="top-buttons"><button id="sound" aria-label="开启音效" title="音效">♪</button><button id="pause" aria-label="暂停" title="暂停">Ⅱ</button></div><div class="timer"><span>TIME LEFT</span><strong id="timer">02:00<span>.00</span></strong></div></header>
+<div id="power-banner"></div><div id="combo-banner"></div>
+<div id="prompt"><span class="prompt-arrow">←</span><div><b>把蓝色楼层划向左边</b><small>让 3 层红色公寓碰在一起</small></div></div>
+<div class="monster-status left-status"><div class="name" id="name0"></div><div class="mood"><i id="mood0"></i></div><span id="status0">想吃蓝色</span></div>
+<div class="monster-status right-status"><div class="name" id="name1"></div><div class="mood"><i id="mood1"></i></div><span id="status1">想吃红色</span></div>
+<footer class="bottom"><p id="hint">左右划走一层 · 同色三层自动合成</p><div><button id="practice">无限练习</button><button id="showcase">连锁演示</button><button id="help">玩法说明</button></div></footer>
+<div id="modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div class="modal-card"><div class="modal-star">✦</div><p class="eyebrow" id="modal-label">MONSTER SHOW</p><h2 id="modal-title"></h2><div id="modal-body"></div><div id="modal-actions"></div></div></div>
+<div id="loading">正在搭建公寓…</div>
+</section>
+<aside class="side guide"><div class="guide-label">HOW TO PLAY <span>01—03</span></div><div class="instruction"><b>01</b><div><h3>划出去，喂对颜色</h3><p>正确投喂安抚怪兽<br>错误颜色会让它发怒</p></div></div><div class="instruction"><b>02</b><div><h3>落下来，连续合成</h3><p>三层同色升级为铜楼<br>金属之间再合成、更上一层</p></div></div><div class="upgrade-path"><span class="bronze">铜</span><i>›</i><span class="silver">银</span><i>›</i><span class="gold">金</span><i>›</i><span class="diamond">钻</span></div><div class="instruction"><b>03</b><div><h3>喂金属，发动超能力</h3><p>合成双倍、分数十倍<br>稳住高塔，争取更长连锁</p></div></div><p class="source-note">依据原作公开玩法重建<br>Three.js 实时渲染 · 鼠标 / 触控</p></aside>
+</main><script type="module" src="/src/main.js"></script>
+</body></html>
