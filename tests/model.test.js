@@ -3,19 +3,22 @@ import { Game, COLORS, findMatch } from '../src/model.js';
 
 const floors = (...types) => types.map((type, i) => ({ id: 100 + i, type }));
 const gameWith = (...types) => {
-  const game = new Game();
+  const game = new Game({ seed: 1 });
   game.floors = floors(...types);
+  game.monsters = [{ color: 'blue', anger: 15, power: 0 }, { color: 'red', anger: 15, power: 0 }];
   game.start();
   return game;
 };
 
-// First swipe gives the intended three-red collapse and rotates the red monster.
-const opening = new Game();
-assert.equal(opening.phase, 'ready');
-opening.tick(20);
-assert.equal(opening.remaining, 120);
+const ready = new Game({ seed: 1 });
+assert.equal(ready.phase, 'ready');
+ready.tick(20);
+assert.equal(ready.remaining, 120);
+assert.equal(ready.played, 0);
+
+// Keep the approved three-red collapse as a fixture, independent of generated openings.
+const opening = gameWith('red', 'red', 'blue', 'red', 'green', 'yellow', 'blue', 'green', 'red', 'yellow', 'green', 'blue', 'yellow', 'red');
 assert.equal(findMatch(opening.floors), null);
-opening.start();
 const first = opening.swipe(opening.floors[2].id, 0);
 assert.equal(first.good, true);
 assert.deepEqual(opening.floors.slice(0, 3).map(floor => floor.type), ['red', 'red', 'red']);
@@ -170,7 +173,7 @@ assert.equal(mega.monsters[0].anger, 0, 'Mega prevents wrong-colour anger');
 mega.floors = floors('green', 'green', 'green');
 assert.equal(mega.resolveMatch(findMatch(mega.floors)).created.filter(floor => floor.type === 'bronze').length, 1, 'Mega does not implicitly enable green');
 
-const timer = new Game();
+const timer = new Game({ seed: 1 });
 timer.start();
 timer.tick(NaN);
 timer.tick(-10);
@@ -179,15 +182,18 @@ timer.tick(120);
 assert.equal(timer.phase, 'ended');
 assert.equal(timer.resultReason, 'time');
 assert.equal(timer.swipe(timer.floors[0].id, 0), null);
+assert.equal(timer.suggestMove(), null);
+timer.tick(10);
+assert.equal(timer.played, 120, 'ended sessions do not advance pacing');
 
 const powerBoundary = gameWith('bronze', 'green');
 powerBoundary.swipe(100, 1); // Red power lasts eight seconds, then clock returns to normal.
 powerBoundary.tick(10);
 assert.ok(Math.abs(powerBoundary.remaining - 114.4) < 1e-8);
 assert.equal(powerBoundary.monsters[1].power, 0);
+assert.equal(powerBoundary.played, 10, 'red slow time does not slow pacing');
 
-const collapse = new Game();
-collapse.start();
+const collapse = gameWith();
 for (let i = 0; i < 12 && collapse.phase === 'playing'; i++) {
   collapse.floors.push({ id: 1000 + i, type: 'yellow' });
   collapse.swipe(1000 + i, 0);
@@ -201,14 +207,22 @@ assert.equal(badMatch.phase, 'playing');
 const badEvent = badMatch.resolveMatch(findMatch(badMatch.floors));
 assert.equal(badEvent.result, 'cat');
 assert.deepEqual(badMatch.floors.map(floor => floor.type), ['cat']);
-const practice = new Game({ mode: 'practice' });
+const practice = new Game({ seed: 1, mode: 'practice' });
 practice.start();
-practice.tick(1000);
+practice.tick(29);
+assert.equal(practice.stage, 0);
+practice.tick(1);
+assert.equal(practice.stage, 1);
+practice.tick(44);
+assert.equal(practice.stage, 1);
+practice.tick(1);
+assert.equal(practice.stage, 2);
+practice.tick(925);
 assert.equal(practice.phase, 'playing');
 assert.equal(practice.remaining, 120);
 assert.ok(Math.abs(practice.tilt) < 1);
 
-// Seeded refill is reproducible and does not manufacture a top-of-tower triple.
+// Refilling before play is reproducible and does not manufacture an opening triple.
 const a = new Game({ seed: 42 });
 const b = new Game({ seed: 42 });
 a.floors = []; b.floors = [];
@@ -216,4 +230,81 @@ assert.deepEqual(a.refill(), b.refill());
 assert.equal(findMatch(a.floors), null);
 assert.equal(new Set(a.floors.map(floor => floor.id)).size, 14);
 
-console.log('model checks passed: retained metal cascades, special bridges, mixed pinks, concrete-to-cat, loot, chains, Mega, timers, tilt and practice');
+// A bounded, deterministic sample checks actual shape variety, legal hints and pacing.
+const shapes = new Set();
+const pacing = [0, 30, 75].map(() => ({ bronze: 0, concrete: 0, signatures: [] }));
+const naturalBase = ['blue', 'green', 'yellow', 'blue', 'green', 'yellow', 'blue', 'green', 'yellow', 'blue', 'green', 'red', 'red'];
+let naturalMatches = 0;
+for (let i = 0; i < 64; i++) {
+  const seed = Math.imul(i + 1, 0x9e3779b9) >>> 0;
+  const game = new Game({ seed });
+  const replay = new Game({ seed });
+  assert.deepEqual(game, replay, 'the same seed reproduces the tower and monsters');
+  assert.equal(game.floors.length, 14);
+  assert.ok(game.floors.every(floor => COLORS.includes(floor.type)));
+  assert.equal(findMatch(game.floors), null);
+  assert.equal(new Set(game.monsters.map(monster => monster.color)).size, 2);
+  const palette = [...new Set(game.floors.map(floor => floor.type))];
+  shapes.add(game.floors.map(floor => palette.indexOf(floor.type)).join(''));
+  const moves = game.floors.map(floor => ({ floor, match: findMatch(game.floors.filter(item => item.id !== floor.id)) })).filter(move => move.match);
+  assert.ok(new Set(moves.map(move => move.match.type)).size >= 2, 'opening has different target-colour choices');
+  assert.ok(moves.some(move => game.monsters.some(monster => monster.color === move.floor.type)), 'at least one opening move feeds the correct colour');
+  const beforeHint = JSON.stringify(game);
+  const hint = game.suggestMove();
+  assert.equal(JSON.stringify(game), beforeHint, 'hints do not change the board or RNG');
+  assert.deepEqual(game.suggestMove(), hint);
+  game.start();
+  assert.equal(game.swipe(hint.id, hint.side)?.good, true);
+  const hintedMatch = findMatch(game.floors);
+  assert.equal(hintedMatch.type, hint.type);
+  assert.equal(hintedMatch.result, hint.result);
+  assert.equal(game.suggestMove(), null, 'pending matches are resolved before another hint');
+
+  for (const [stage, seconds] of [0, 30, 75].entries()) {
+    const sample = new Game({ seed, mode: 'practice' });
+    sample.start();
+    sample.tick(seconds);
+    sample.floors = [];
+    const added = sample.refill();
+    assert.equal(sample.stage, stage);
+    assert.equal(findMatch(sample.floors), null);
+    pacing[stage].signatures.push(added.map(floor => floor.type).join(','));
+    for (const type of ['bronze', 'concrete']) pacing[stage][type] += added.filter(floor => floor.type === type).length;
+  }
+
+  const natural = new Game({ seed, mode: 'practice' });
+  natural.start();
+  natural.tick(30);
+  natural.floors = floors(...naturalBase, 'blue');
+  natural.swipe(113, 0);
+  const retained = structuredClone(natural.floors);
+  natural.refill();
+  assert.deepEqual(natural.floors.slice(0, retained.length), retained, 'refill only adds new floors');
+  if (findMatch(natural.floors)) {
+    naturalMatches++;
+    // Present another possible top triple without a new feed: its refill allowance is spent.
+    for (let retry = 0; retry < 4; retry++) {
+      natural.floors = structuredClone(retained);
+      natural.refill();
+      assert.equal(findMatch(natural.floors), null, 'one feed cannot fund an endless natural-refill cascade');
+    }
+  }
+}
+assert.ok(shapes.size > 32, 'openings vary in arrangement, not just colour permutation');
+assert.notDeepEqual(pacing[0].signatures, pacing[1].signatures);
+assert.notDeepEqual(pacing[1].signatures, pacing[2].signatures);
+assert.ok(pacing[1].bronze > pacing[0].bronze, 'middle stage offers more metal bridges');
+assert.ok(pacing[2].concrete > pacing[1].concrete, 'late stage raises obstacle pressure');
+assert.ok(naturalMatches > 0 && naturalMatches < 64, 'normal refill sometimes creates a natural match');
+
+// Four fruitless feeds can nudge a newly added colour; the old tower stays untouched.
+const rescue = gameWith('blue', 'green', 'yellow', 'blue', 'green', 'yellow', 'blue', 'green', 'yellow', 'green', 'red', 'red', 'blue', 'yellow', 'green', 'yellow', 'green');
+for (let id = 116; id >= 113; id--) rescue.swipe(id, 0);
+assert.equal(findMatch(rescue.floors), null);
+assert.equal(rescue.suggestMove(), null);
+const retained = structuredClone(rescue.floors);
+assert.deepEqual(rescue.refill().map(floor => floor.type), ['red']);
+assert.deepEqual(rescue.floors.slice(0, retained.length), retained);
+assert.ok(rescue.suggestMove());
+
+console.log(`model checks passed: all core regressions; 64 seeds, ${shapes.size} opening shapes, ${naturalMatches} natural refill samples, legal hints, pacing and additive rescue`);

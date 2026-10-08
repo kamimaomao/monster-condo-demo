@@ -39,6 +39,15 @@ const RULES = {
   megaScoreMultiplier: 100,
 };
 
+// Demo pacing only: these generation weights are not rules or values from the original game.
+const PACING = [
+  { until: 30, concrete: .015, bronze: .015, reward: .035, pair: 2.4, food: 1.5, natural: .22 },
+  { until: 75, concrete: .055, bronze: .09, reward: .09, pair: 3.1, food: 1.35, natural: .5 },
+  { until: Infinity, concrete: .13, bronze: .07, reward: .075, pair: 2.3, food: 1.15, natural: .28 },
+];
+const OPENING_ATTEMPTS = 64;
+const RESCUE_AFTER_FEEDS = 4;
+
 /** Floors run bottom-to-top. ids contains the matching cores; resolveMatch collects special neighbours. */
 export function findMatch(floors) {
   for (let i = 0; i < floors.length; i++) {
@@ -62,14 +71,21 @@ export function findMatch(floors) {
 }
 
 export class Game {
-  constructor({ seed = 0xc0d0, mode = 'classic' } = {}) {
+  constructor({ seed = Math.floor(Math.random() * 4294967296), mode = 'classic' } = {}) {
     this.mode = mode;
     this._seed = Number(seed) >>> 0;
     this._nextId = 1;
     this._chainRemaining = 0;
     this._leanDirection = 1;
-    this.floors = ['red', 'red', 'blue', 'red', 'green', 'yellow', 'blue', 'green', 'red', 'yellow', 'green', 'blue', 'yellow', 'red'].map(type => this._floor(type));
-    this.monsters = [{ color: 'blue', anger: 15, power: 0 }, { color: 'red', anger: 15, power: 0 }];
+    const colors = [...COLORS];
+    this.monsters = Array.from({ length: 2 }, () => ({ color: colors.splice(Math.floor(this._random() * colors.length), 1)[0], anger: 15, power: 0 }));
+    this.floors = this._opening().map(type => this._floor(type));
+    this.played = 0;
+    this.stage = 0;
+    this._refillFeeds = 0;
+    this._refillMatches = 0;
+    this._dryFeeds = 0;
+    this._naturalMatches = 0;
     this.remaining = RULES.seconds;
     this.score = 0;
     this.baseMultiplier = 1;
@@ -91,6 +107,50 @@ export class Game {
   }
 
   _floor(type) { return { id: this._nextId++, type }; }
+
+  _opening() {
+    for (let attempt = 0; attempt < OPENING_ATTEMPTS; attempt++) {
+      const floors = [];
+      while (floors.length < RULES.towerHeight) {
+        const choices = COLORS.filter(color => !(floors.at(-1)?.type === color && floors.at(-2)?.type === color));
+        floors.push({ id: floors.length, type: choices[Math.floor(this._random() * choices.length)] });
+      }
+      const moves = this._moves(floors);
+      if (new Set(moves.map(move => move.type)).size >= 2 && moves.some(move => move.good)) return floors.map(floor => floor.type);
+    }
+    // Bounded fallback: three independent gaps, with three distinct edible gap colours.
+    const colors = [...COLORS];
+    const [a, b, c, d] = Array.from({ length: 4 }, () => colors.splice(Math.floor(this._random() * colors.length), 1)[0]);
+    return [a, a, b, a, c, c, d, c, b, b, a, b, d, c];
+  }
+
+  _moves(floors = this.floors) {
+    const moves = [];
+    // ponytail: bounded 14-floor lookahead; use cached matches if tower sizes become large.
+    floors.forEach((floor, index) => {
+      if (!TYPES[floor.type] || floor.type === 'concrete') return;
+      const after = floors.filter((_, i) => i !== index);
+      const match = findMatch(after);
+      if (!match) return;
+      const goodSides = this.monsters.map((monster, side) => COLORS.includes(floor.type) && floor.type !== monster.color ? -1 : side).filter(side => side >= 0);
+      const good = goodSides.length > 0;
+      const sides = good ? goodSides : [0, 1];
+      const side = sides.reduce((best, next) => (good ? this.monsters[next].anger > this.monsters[best].anger : this.monsters[next].anger < this.monsters[best].anger) ? next : best);
+      const preview = after.filter(item => !match.ids.includes(item.id));
+      if (match.result !== 'mega') preview.splice(after.findIndex(item => item.id === match.ids[0]), 0, { id: -1, type: match.result });
+      // Heuristic only: this preview estimates a follow-up and does not award or resolve it.
+      const next = findMatch(preview);
+      const tier = match.result === 'mega' ? 5 : Math.max(0, TYPES[match.result]?.tier ?? 0);
+      moves.push({ id: floor.id, side, type: match.type, result: match.result, good, rank: (good ? 10000 : 0) + tier * 100 + (next ? 80 : 0) + match.ids.length });
+    });
+    return moves.sort((a, b) => b.rank - a.rank);
+  }
+
+  suggestMove() {
+    if (this.phase === 'ended' || findMatch(this.floors)) return null;
+    const move = this._moves()[0];
+    return move ? { id: move.id, side: move.side, type: move.type, result: move.result } : null;
+  }
 
   _power(color) {
     return this.monsters.some(monster => monster.color === color && monster.power > 0);
@@ -203,21 +263,40 @@ export class Game {
 
   refill() {
     if (this.phase === 'ended') return [];
+    const feeds = this.feeds - this._refillFeeds;
+    this._dryFeeds = this.matches > this._refillMatches ? 0 : this._dryFeeds + Math.max(0, feeds);
+    if (feeds > 0) this._naturalMatches = 0;
+    this._refillFeeds = this.feeds;
+    this._refillMatches = this.matches;
+    const pacing = PACING[this.stage];
+    let allowNatural = this.phase === 'playing' && this.feeds > 0 && this._naturalMatches === 0 && this._random() < pacing.natural;
     const added = [];
     while (this.floors.length < RULES.towerHeight) {
-      let type;
-      if (this.feeds >= 6 && this.floors.filter(floor => floor.type === 'concrete').length < 3 && this._random() < 0.07) {
-        type = 'concrete';
-      } else {
-        const top = [];
-        for (let i = this.floors.length - 1; i >= 0 && top.length < 2; i--) {
-          const floor = this.floors[i];
-          if (TYPES[floor.type].tier === 0) top.push(floor.type);
+      const top = this.floors.findLast(floor => COLORS.includes(floor.type))?.type;
+      const colors = COLORS.map(type => ({ type, weight: (type === top ? pacing.pair : 1) * (this.monsters.some(monster => monster.color === type) ? pacing.food : 1) }));
+      const total = colors.reduce((sum, item) => sum + item.weight, 0);
+      colors.forEach(item => { item.weight *= (1 - pacing.concrete - pacing.bronze - pacing.reward) / total; });
+      const rewards = this.stage === 0 ? ['clock', 'piggy'] : ['clock', 'piggy', 'cat', 'multiplier'];
+      let choices = [...colors, { type: 'bronze', weight: pacing.bronze }, ...rewards.map(type => ({ type, weight: pacing.reward / rewards.length }))];
+      if (this.floors.filter(floor => floor.type === 'concrete').length < 2 + this.stage) choices.push({ type: 'concrete', weight: pacing.concrete });
+      choices = choices.map(choice => {
+        const trial = [...this.floors, { id: -1, type: choice.type }];
+        // A pre-existing lower match must not conceal a new match at the top.
+        const natural = trial.some((_, i) => findMatch(trial.slice(i))?.ids.includes(-1));
+        return { ...choice, trial, natural };
+      }).filter(choice => allowNatural || !choice.natural);
+      // ponytail: four empty feeds trigger a local colour nudge, not a guaranteed solver.
+      if (this._dryFeeds >= RESCUE_AFTER_FEEDS && !findMatch(this.floors) && !this.suggestMove()) {
+        const helpful = choices.filter(choice => COLORS.includes(choice.type) && !choice.natural).map(choice => ({ ...choice, move: this._moves(choice.trial)[0] })).filter(choice => choice.move);
+        if (helpful.length) {
+          const best = Math.max(...helpful.map(choice => choice.move.rank));
+          choices = helpful.filter(choice => choice.move.rank === best);
         }
-        const choices = COLORS.filter(color => !(top.length === 2 && top[0] === color && top[1] === color));
-        type = choices[Math.floor(this._random() * choices.length)];
       }
-      const floor = this._floor(type);
+      let roll = this._random() * choices.reduce((sum, item) => sum + item.weight, 0);
+      const choice = choices.find(item => (roll -= item.weight) < 0) ?? choices.at(-1);
+      if (choice.natural) { this._naturalMatches++; allowNatural = false; }
+      const floor = this._floor(choice.type);
       this.floors.push(floor);
       added.push(floor);
     }
@@ -231,6 +310,8 @@ export class Game {
     while (elapsed > 0 && this.phase === 'playing') {
       const boundaries = [elapsed, this.mega, ...this.monsters.map(monster => monster.power)].filter(value => value > 0);
       const step = Math.min(...boundaries);
+      this.played += step;
+      this.stage = PACING.findIndex(pacing => this.played < pacing.until);
       const red = this._power('red');
       const blue = this._power('blue');
       if (this.mode !== 'practice') this.remaining = Math.max(0, this.remaining - step * (red ? 0.45 : 1));

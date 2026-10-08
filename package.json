@@ -7,7 +7,7 @@
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "vite build --base=./ && node scripts/package.mjs",
     "preview": "vite preview --host 0.0.0.0 --port 4173",
-    "test": "node tests/model.test.js"
+    "test": "node tests/model.test.js && node tests/lifecycle.test.js"
   },
   "dependencies": {
     "three": "0.186.0"

@@ -47,10 +47,10 @@ export class TowerScene{
   return {g,mats,f,vy:0,x:0,y:-90,target:0,oldTarget:0,flash:0,matching:false,landed:false};
  }
  sync(floors){
-  const keep=new Set(floors.map(f=>f.id));for(const [id,o] of this.items){if(!keep.has(id)){this.tower.remove(o.g);o.g.traverse(n=>{if(n.material){for(const m of Array.isArray(n.material)?n.material:[n.material])m.dispose();}});this.items.delete(id);}}
+  const keep=new Map(floors.map(f=>[f.id,f.type]));for(const [id,o] of this.items){if(keep.get(id)!==o.f.type){this.tower.remove(o.g);o.g.traverse(n=>{if(n.material){for(const m of Array.isArray(n.material)?n.material:[n.material])m.dispose();}});this.items.delete(id);}}
   floors.forEach((f,i)=>{let o=this.items.get(f.id);if(!o){o=this.floor(f);this.items.set(f.id,o);o.y=Math.min(BASE-i*STEP-170,-45);o.target=BASE-i*STEP;}o.oldTarget=o.target;o.target=BASE-i*STEP;if(Math.abs(o.target-o.oldTarget)>5)o.landed=false;o.f=f;});
  }
- settle(){for(const o of this.items.values()){o.y=o.target;o.vy=0;o.landed=true;}}
+ settle(){this.tilt=0;this.shake=0;for(const p of this.particles){this.scene.remove(p.mesh);p.mesh.material.dispose();if(p.ring)p.mesh.geometry.dispose();}this.particles=[];for(const o of this.items.values()){o.y=o.target;o.vy=0;o.x=0;o.matching=false;o.landed=true;}}
  mark(ids,on=true){const mid=ids.reduce((sum,id)=>sum+this.getY(id),0)/ids.length;for(const id of ids){const o=this.items.get(id);if(o){o.matching=on;o.matchStart=this.time;o.matchCenter=mid;}}}
  dragFloor(id,x){this.drag=id==null?null:{id,x};}
  getY(id){return this.items.get(id)?.y??BASE;}
